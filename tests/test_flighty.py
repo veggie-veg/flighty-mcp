@@ -109,6 +109,27 @@ class GetFlightTest(FixtureDB):
         self.add_owner_flight("243", 2)
         self.assertIsNone(flighty.get_flight(flight_number="UA243"))
 
+    def test_repeated_route_reads_the_next_leg(self):
+        """Audit 18 Nov 2026: a number flown weekly (or booked twice) read back its
+        furthest-out leg, so status and delay forecast described the wrong day."""
+        for days in (-14, -7, 7, 14):
+            self.add_owner_flight("243", days)
+        self.assertEqual(flighty.get_flight(flight_number="BA243")["id"], "f-243-7")
+        status = flighty.get_flight_status("BA243")
+        self.assertEqual(
+            status["scheduled_departure"], flighty.get_flight(flight_id="f-243-7")["departureScheduleGateOriginal"]
+        )
+
+    def test_repeated_route_in_the_air_beats_next_week(self):
+        self.add_owner_flight("243", -0.1)  # departed ~2h ago, lands ~9h from now
+        self.add_owner_flight("243", 7)
+        self.assertEqual(flighty.get_flight(flight_number="BA243")["id"], "f-243--0.1")
+
+    def test_repeated_route_all_past_reads_the_latest(self):
+        for days in (-21, -7, -14):
+            self.add_owner_flight("243", days)
+        self.assertEqual(flighty.get_flight(flight_number="BA243")["id"], "f-243--7")
+
 
 class AddFlightTest(FixtureDB):
     def test_inserts_with_the_owners_account_id(self):

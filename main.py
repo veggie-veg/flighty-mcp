@@ -76,7 +76,8 @@ def get_flight(
     """Get detailed information about a specific flight.
 
     Provide either flight_id (internal ID) or flight_number (e.g. "UA194", "BA930").
-    If flight_number is given, returns the most recent instance.
+    If flight_number is given and it has several legs, returns the next leg that
+    has not landed yet (an in-air leg counts), or the most recent one if all have.
 
     Args:
         flight_id: The internal Flighty flight ID.

@@ -288,7 +288,11 @@ def list_friend_flights(
 
 
 def get_flight(flight_id: str | None = None, flight_number: str | None = None) -> dict[str, Any] | None:
-    """Get a specific flight by ID or flight number (returns most recent match)."""
+    """Get a specific flight by ID or flight number.
+
+    A flight number with several legs returns the next leg that has not landed
+    yet, or the most recent leg if all have landed.
+    """
     conn = _get_db()
     query = _flight_base_query()
 
@@ -303,8 +307,21 @@ def get_flight(flight_id: str | None = None, flight_number: str | None = None) -
             " AND (UPPER(al.iata) || UPPER(REPLACE(f.number, ' ', '')) = ?"
             " OR UPPER(REPLACE(f.number, ' ', '')) = ?)"
         )
-        query += " ORDER BY f.departureScheduleGateOriginal DESC LIMIT 1"
-        params = [wanted, wanted]
+        # One number can have several legs (a weekly route, a repeat booking).
+        # Take the soonest leg that has not landed yet (an in-air leg counts),
+        # and only if every leg has landed, the most recent one.
+        landed_by = (
+            "COALESCE(f.arrivalScheduleGateActual, f.arrivalScheduleGateEstimated,"
+            " f.arrivalScheduleGateOriginal, f.departureScheduleGateOriginal)"
+        )
+        query += (
+            f" ORDER BY CASE WHEN {landed_by} >= ? THEN 0 ELSE 1 END,"
+            f" CASE WHEN {landed_by} >= ? THEN f.departureScheduleGateOriginal"
+            " ELSE -f.departureScheduleGateOriginal END"
+            " LIMIT 1"
+        )
+        now = int(datetime.now(timezone.utc).timestamp())
+        params = [wanted, wanted, now, now]
     else:
         return None
 
@@ -362,7 +379,7 @@ def search_flights(
 
 
 def get_flight_status(flight_number: str) -> dict[str, Any] | None:
-    """Get delay and status info for the most recent instance of a flight number."""
+    """Get delay and status info for the next (or current) leg of a flight number."""
     flight = get_flight(flight_number=flight_number)
     if not flight:
         return None
