@@ -645,6 +645,19 @@ def _airport_timezone(airport: dict[str, Any]) -> tzinfo:
     return timezone.utc
 
 
+def _get_account_id(conn: sqlite3.Connection, user_id: str) -> int:
+    """The local account the owner's rows are filed under (UserFlight.accountId)."""
+    row = conn.execute(
+        "SELECT accountId FROM UserFlight WHERE userId = ? GROUP BY accountId"
+        " ORDER BY COUNT(*) DESC LIMIT 1",
+        [user_id],
+    ).fetchone()
+    if row:
+        return row[0]
+    row = conn.execute("SELECT id FROM Account WHERE rawKind = 'main' LIMIT 1").fetchone()
+    return row[0] if row else 0
+
+
 def _get_owner_user_id(conn: sqlite3.Connection) -> str:
     """Get the local Flighty owner's user ID.
 
@@ -777,6 +790,7 @@ def add_flight(
         dep_airport = _lookup_airport(conn, departure_airport)
         arr_airport = _lookup_airport(conn, arrival_airport)
         user_id = _get_owner_user_id(conn)
+        account_id = _get_account_id(conn, user_id)
 
         # Parse departure datetime in the departure airport's local timezone.
         # Times are entered as local wall-clock times, so they must be localized
@@ -801,6 +815,17 @@ def add_flight(
             arr_ts = int(arr_dt.timestamp())
         else:
             arr_ts = dep_ts + 3 * 3600  # default: 3 hours later
+
+        # The same flight number within a day of the requested departure is already
+        # tracked: return it rather than insert a duplicate.
+        existing = conn.execute(
+            _flight_base_query()
+            + " AND uf.userId = ? AND f.airlineId = ? AND f.number = ?"
+            " AND ABS(f.departureScheduleGateOriginal - ?) < 86400 LIMIT 1",
+            [user_id, airline["id"], flight_number, dep_ts],
+        ).fetchone()
+        if existing:
+            return {**_build_flight_dict(existing), "status": "exists"}
 
         now_ts = int(datetime.now(timezone.utc).timestamp())
         flight_id = str(uuid.uuid4())
@@ -828,11 +853,11 @@ def add_flight(
         conn.execute(
             """
             INSERT INTO UserFlight (
-                userId, flightId, isRandom, isProUpgrade, isMyFlight,
+                accountId, userId, flightId, isRandom, isProUpgrade, isMyFlight,
                 isArchived, importSource, lastUpdated, created
-            ) VALUES (?, ?, 0, 0, 1, 0, 'MCP', ?, ?)
+            ) VALUES (?, ?, ?, 0, 0, 1, 0, 'MCP', ?, ?)
             """,
-            [user_id, flight_id, now_ts, now_ts],
+            [account_id, user_id, flight_id, now_ts, now_ts],
         )
 
         # Optionally insert Ticket row
@@ -840,11 +865,11 @@ def add_flight(
             conn.execute(
                 """
                 INSERT INTO Ticket (
-                    userId, flightId, seatNumber, seatPosition, cabinClass,
+                    accountId, userId, flightId, seatNumber, seatPosition, cabinClass,
                     pnr, lastUpdated
-                ) VALUES (?, ?, ?, NULL, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
                 """,
-                [user_id, flight_id, seat_number, cabin_class, booking_reference, now_ts],
+                [account_id, user_id, flight_id, seat_number, cabin_class, booking_reference, now_ts],
             )
 
         conn.commit()
