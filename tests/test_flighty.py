@@ -93,6 +93,23 @@ class ListFlightsTest(FixtureDB):
         self.assertNotIn("More may exist", formatting.format_flight_list(flights, limit=10))
 
 
+class GetFlightTest(FixtureDB):
+    def test_full_code_matches_airline_plus_number(self):
+        """17 Nov 2026: get_flight("AA2123") returned None for a flight list_flights
+        showed, because Flighty stores number "2123" and airline AA apart."""
+        self.add_owner_flight("243", 2)
+        for code in ("BA243", "ba 243", "BA-243", "243"):
+            with self.subTest(code=code):
+                out = flighty.get_flight(flight_number=code)
+                self.assertIsNotNone(out)
+                self.assertEqual(out["flight_number"], "243")
+        self.assertIsNotNone(flighty.get_flight_status("BA243"))
+
+    def test_other_airline_same_number_does_not_match(self):
+        self.add_owner_flight("243", 2)
+        self.assertIsNone(flighty.get_flight(flight_number="UA243"))
+
+
 class AddFlightTest(FixtureDB):
     def test_inserts_with_the_owners_account_id(self):
         self.add_owner_flight("999", -30)
