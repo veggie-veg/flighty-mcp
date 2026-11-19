@@ -338,10 +338,24 @@ def search_flights(
     before: str | None = None,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    """Search flights by airline, airports, or date range."""
+    """Search flights by airline, airports, or date range.
+
+    Covers the owner's AND friends' flights; every friend row carries
+    friend_name so the output labels it (19 Nov 2026: an unlabelled friend's
+    flight read as the owner's and was reported as a clash).
+    """
     conn = _get_db()
-    query = _flight_base_query()
-    params: list[Any] = []
+    owner_id = _get_owner_user_id(conn)
+    query = _flight_base_query().replace(
+        "LEFT JOIN Ticket t ON f.id = t.flightId AND uf.userId = t.userId",
+        "LEFT JOIN Ticket t ON f.id = t.flightId AND uf.userId = t.userId\n"
+        "LEFT JOIN Profile p ON uf.userId = p.userId AND uf.accountId = p.accountId",
+    ).replace(
+        "SELECT\n    f.id,",
+        "SELECT\n    CASE WHEN uf.userId = ? THEN NULL"
+        " ELSE COALESCE(p.fullName, 'unknown friend') END AS friend_name,\n    f.id,",
+    )
+    params: list[Any] = [owner_id]
 
     if airline:
         query += (

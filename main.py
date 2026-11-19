@@ -98,6 +98,8 @@ def search_flights(
 ) -> str:
     """Search flights by airline, airports, or date range.
 
+    Includes friends' flights, each marked "(friend: <name>)"; an unmarked row is
+    your own. For your flights only, use list_flights.
     Results are sorted chronologically (earliest departure first).
 
     Args:

@@ -93,6 +93,40 @@ class ListFlightsTest(FixtureDB):
         self.assertNotIn("More may exist", formatting.format_flight_list(flights, limit=10))
 
 
+class SearchFlightsTest(FixtureDB):
+    def test_friend_rows_are_labelled_and_own_rows_are_not(self):
+        """19 Nov 2026: search_flights listed amr*'s DL1999 beside Joseph's AA6957
+        with no owner label, and it was reported to him as a clash."""
+        self.add_owner_flight("243", 2)
+        conn = sqlite3.connect(self.db)
+        dep = int((datetime.now(timezone.utc) + timedelta(days=2)).timestamp())
+        conn.execute(
+            "INSERT INTO Flight (id, number, departureAirportId, scheduledArrivalAirportId,"
+            " actualArrivalAirportId, airlineId, isCancelled, hasOfficialData, distance,"
+            " lastKnownDepartureDate, lastKnownArrivalDate, departureScheduleGateOriginal,"
+            " arrivalScheduleGateOriginal, created, lastUpdated)"
+            " VALUES ('f-friend', '999', 'LHR', 'MEX', 'MEX', 'BA', 0, '1', 0, ?, ?, ?, ?, 0, 0)",
+            [dep, dep + 40000, dep, dep + 40000],
+        )
+        conn.execute(
+            "INSERT INTO UserFlight (accountId, userId, flightId, isRandom, isProUpgrade,"
+            " isMyFlight, isArchived, importSource, created, lastUpdated)"
+            " VALUES (7, 'friend-uuid', 'f-friend', 0, 0, 0, 0, 'CONNECTED_FRIEND', 0, 0)"
+        )
+        conn.execute(
+            "INSERT INTO Profile (accountId, userId, fullName, lastUpdated)"
+            " VALUES (7, 'friend-uuid', 'amr*', 0)"
+        )
+        conn.commit()
+        conn.close()
+        flights = {f["flight_number"]: f for f in flighty.search_flights(airline="BA")}
+        self.assertIsNone(flights["243"]["friend_name"])
+        self.assertEqual(flights["999"]["friend_name"], "amr*")
+        text = formatting.format_flight_list(list(flights.values()))
+        self.assertIn("BA999 — British Airways · LHR → MEX (friend: amr*)", text)
+        self.assertNotIn("BA243 — British Airways · LHR → MEX (friend", text)
+
+
 class GetFlightTest(FixtureDB):
     def test_full_code_matches_airline_plus_number(self):
         """17 Nov 2026: get_flight("AA2123") returned None for a flight list_flights
